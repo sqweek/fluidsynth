@@ -27,7 +27,7 @@ func NewSynth(settings map[string]interface{}) *Synth {
 			cval := C.CString(value)
 			C.fluid_settings_setstr(csettings, ckey, cval)
 			C.free(unsafe.Pointer(cval))
-		case int32:
+		case int:
 			C.fluid_settings_setint(csettings, ckey, C.int(value))
 		case float64:
 			C.fluid_settings_setnum(csettings, ckey, C.double(value))
@@ -59,23 +59,24 @@ func (s *Synth) Delete() {
 	C.delete_fluid_settings(s.csettings)
 }
 
-func (s *Synth) NoteOn(channel, note, velocity int) {
+func (s *Synth) NoteOn(channel, note, velocity uint8) {
 	C.fluid_synth_noteon(s.csynth, C.int(channel), C.int(note), C.int(velocity))
 }
 
-func (s *Synth) NoteOff(channel, note int) {
+func (s *Synth) NoteOff(channel, note uint8) {
 	C.fluid_synth_noteoff(s.csynth, C.int(channel), C.int(note))
 }
 
-func (s *Synth) ProgramChange(channel, program int) {
+func (s *Synth) ProgramChange(channel, program uint8) {
 	C.fluid_synth_program_change(s.csynth, C.int(channel), C.int(program))
 }
 
-func (s *Synth) WriteFrames_int16(nf int) []int16 {
-	buf := make([]int16, nf*2)
-	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
+func (s *Synth) WriteFrames_int16(dst []int16) {
+	if len(dst) % 2 != 0 {
+		panic("dst not disivible by 2")
+	}
+	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&dst))
 	cbuf := unsafe.Pointer(hdr.Data)
-	C.fluid_synth_write_s16(s.csynth, C.int(nf), cbuf, 0, 2, cbuf, 1, 2)
-	return buf
+	C.fluid_synth_write_s16(s.csynth, C.int(len(dst)/2), cbuf, 0, 2, cbuf, 1, 2)
 }
 
