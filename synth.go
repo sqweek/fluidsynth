@@ -4,7 +4,6 @@ package fluidsynth
 // #include <fluidsynth.h>
 // #include <stdlib.h>
 import "C"
-import "reflect"
 
 import (
 	"os"
@@ -75,8 +74,6 @@ func (s *Synth) WriteFrames_int16(dst []int16) {
 	if len(dst) % 2 != 0 {
 		panic("dst not disivible by 2")
 	}
-	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&dst))
-	cbuf := unsafe.Pointer(hdr.Data)
+	cbuf := unsafe.Pointer(&dst[0])
 	C.fluid_synth_write_s16(s.csynth, C.int(len(dst)/2), cbuf, 0, 2, cbuf, 1, 2)
 }
-
