@@ -6,74 +6,83 @@ package fluidsynth
 import "C"
 
 import (
-	"os"
-	"fmt"
 	"unsafe"
 )
 
 type Synth struct {
-	csettings *C.fluid_settings_t
-	csynth *C.fluid_synth_t
-	cdriver *C.fluid_audio_driver_t
+	ptr *C.fluid_synth_t
 }
 
-func NewSynth(settings map[string]interface{}) *Synth {
-	csettings, _ := C.new_fluid_settings()
-	for key, value := range settings {
-		ckey := C.CString(key)
-		switch value := value.(type) {
-		case string:
-			cval := C.CString(value)
-			C.fluid_settings_setstr(csettings, ckey, cval)
-			C.free(unsafe.Pointer(cval))
-		case int:
-			C.fluid_settings_setint(csettings, ckey, C.int(value))
-		case float64:
-			C.fluid_settings_setnum(csettings, ckey, C.double(value))
-		default:
-			fmt.Fprintf(os.Stderr, "NewSynth: ignoring setting %s: unhandled type %T\n", key, value)
-		}
-		C.free(unsafe.Pointer(ckey))
+func cbool(b bool) C.int {
+	if b {
+		return 1
 	}
-	csynth := C.new_fluid_synth(csettings)
-	//cdriver := C.new_fluid_audio_driver(csettings, csynth)
-	return &Synth{csettings, csynth, nil}
+	return 0
+}
+
+func NewSynth(settings Settings) Synth {
+	return Synth{C.new_fluid_synth(settings.ptr)}
+}
+
+func (s *Synth) Delete() {
+	C.delete_fluid_synth(s.ptr)
 }
 
 func (s *Synth) SFLoad(path string, resetPresets bool) int {
 	cpath := C.CString(path)
 	defer C.free(unsafe.Pointer(cpath))
-	creset := C.int(1)
-	if !resetPresets {
-		creset = 0
-	}
-	cfont_id, _ := C.fluid_synth_sfload(s.csynth, cpath, creset)
+	creset := cbool(resetPresets)
+	cfont_id, _ := C.fluid_synth_sfload(s.ptr, cpath, creset)
 	return int(cfont_id)
 }
 
-/* XXX can this be run automatically on gc? */
-func (s *Synth) Delete() {
-	//C.delete_fluid_audio_driver(s.cdriver)
-	C.delete_fluid_synth(s.csynth)
-	C.delete_fluid_settings(s.csettings)
-}
-
 func (s *Synth) NoteOn(channel, note, velocity uint8) {
-	C.fluid_synth_noteon(s.csynth, C.int(channel), C.int(note), C.int(velocity))
+	C.fluid_synth_noteon(s.ptr, C.int(channel), C.int(note), C.int(velocity))
 }
 
 func (s *Synth) NoteOff(channel, note uint8) {
-	C.fluid_synth_noteoff(s.csynth, C.int(channel), C.int(note))
+	C.fluid_synth_noteoff(s.ptr, C.int(channel), C.int(note))
 }
 
 func (s *Synth) ProgramChange(channel, program uint8) {
-	C.fluid_synth_program_change(s.csynth, C.int(channel), C.int(program))
+	C.fluid_synth_program_change(s.ptr, C.int(channel), C.int(program))
 }
 
-func (s *Synth) WriteFrames_int16(dst []int16) {
-	if len(dst) % 2 != 0 {
-		panic("dst not disivible by 2")
+/* WriteS16 synthesizes signed 16-bit samples. It will fill as much of the provided
+slices as it can without overflowing 'left' or 'right'. For interleaved stereo, have both
+'left' and 'right' share a backing array and use lstride = rstride = 2. ie:
+    synth.WriteS16(samples, samples[1:], 2, 2)
+*/
+func (s *Synth) WriteS16(left, right []int16, lstride, rstride int) {
+	nframes := (len(left) + lstride - 1) / lstride
+	rframes := (len(right) + rstride - 1) / rstride
+	if rframes < nframes {
+		nframes = rframes
 	}
-	cbuf := unsafe.Pointer(&dst[0])
-	C.fluid_synth_write_s16(s.csynth, C.int(len(dst)/2), cbuf, 0, 2, cbuf, 1, 2)
+	C.fluid_synth_write_s16(s.ptr, C.int(nframes), unsafe.Pointer(&left[0]), 0, C.int(lstride), unsafe.Pointer(&right[0]), 0, C.int(rstride))
+}
+
+func (s *Synth) WriteFloat(left, right []float32, lstride, rstride int) {
+	nframes := (len(left) + lstride - 1) / lstride
+	rframes := (len(right) + rstride - 1) / rstride
+	if rframes < nframes {
+		nframes = rframes
+	}
+	C.fluid_synth_write_float(s.ptr, C.int(nframes), unsafe.Pointer(&left[0]), 0, C.int(lstride), unsafe.Pointer(&right[0]), 0, C.int(rstride))
+}
+
+type TuningId struct {
+	Bank, Program uint8
+}
+
+/* ActivateKeyTuning creates/modifies a specific tuning bank/program */
+func (s *Synth) ActivateKeyTuning(id TuningId, name string, tuning [128]float64, apply bool) {
+	n := C.CString(name)
+	defer C.free(unsafe.Pointer(n))
+	C.fluid_synth_activate_key_tuning(s.ptr, C.int(id.Bank), C.int(id.Program), n, (*C.double)(&tuning[0]), cbool(apply))
+}
+
+/* ActivateTuning switches a midi channel onto the specified tuning bank/program */
+func (s *Synth) ActivateTuning(channel uint8, id TuningId, apply bool) {
+	C.fluid_synth_activate_tuning(s.ptr, C.int(channel), C.int(id.Bank), C.int(id.Program), cbool(apply))
 }
